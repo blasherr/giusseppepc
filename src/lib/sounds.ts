@@ -1,14 +1,20 @@
 class SoundManager {
   private ctx: AudioContext | null = null;
 
-  private getCtx(): AudioContext {
-    if (!this.ctx) {
-      this.ctx = new AudioContext();
+  private getCtx(): AudioContext | null {
+    try {
+      if (!this.ctx) {
+        const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        if (!AC) return null;
+        this.ctx = new AC();
+      }
+      if (this.ctx.state === "suspended") {
+        this.ctx.resume();
+      }
+      return this.ctx;
+    } catch {
+      return null;
     }
-    if (this.ctx.state === "suspended") {
-      this.ctx.resume();
-    }
-    return this.ctx;
   }
 
   private tone(
@@ -19,6 +25,7 @@ class SoundManager {
   ) {
     try {
       const ctx = this.getCtx();
+      if (!ctx) return;
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.connect(gain);
@@ -40,6 +47,7 @@ class SoundManager {
   private noise(duration: number, vol = 0.15) {
     try {
       const ctx = this.getCtx();
+      if (!ctx) return;
       const size = ctx.sampleRate * duration;
       const buffer = ctx.createBuffer(1, size, ctx.sampleRate);
       const data = buffer.getChannelData(0);
