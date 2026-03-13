@@ -113,7 +113,7 @@ export function saveGameState(state: GameState): void {
 
 export function resetGameState(): void {
   if (typeof window === "undefined") return;
-  localStorage.removeItem(STORAGE_KEY);
+  try { localStorage.removeItem(STORAGE_KEY); } catch (e) { /* blocked */ }
   window.dispatchEvent(new CustomEvent("aura-state-change", { detail: createDefaultState() }));
 }
 

@@ -1,15 +1,4 @@
-import { firestore } from "./firebase";
-import {
-  collection,
-  addDoc,
-  onSnapshot,
-  deleteDoc,
-  doc,
-  query,
-  orderBy,
-  serverTimestamp,
-  type DocumentData,
-} from "firebase/firestore";
+import { getFirestoreInstance } from "./firebase";
 
 export type AdminCommand =
   | { type: "message"; text: string }
@@ -47,63 +36,64 @@ class SessionBridge {
     try {
       this.channel = new BroadcastChannel("cerberus-os");
       this.channel.onmessage = (e: MessageEvent<{ source: string; data: AdminCommand | UserEvent }>) => {
-        const msg = e.data;
+        var msg = e.data;
         this.dispatch(msg.source, msg.data);
       };
-    } catch {
+    } catch (e) {
       /* not available */
     }
 
-    // Firestore listeners (only if Firebase is configured)
-    if (firestore) {
-      this.initFirestore();
-    }
+    // Firestore listeners (loaded async to avoid crash)
+    this.initFirestore();
   }
 
-  private initFirestore() {
-    if (!firestore) return;
-
+  private async initFirestore() {
     try {
+      var fs = await getFirestoreInstance();
+      if (!fs) return;
+
+      var { collection, onSnapshot, deleteDoc, doc, query, orderBy } = await import("firebase/firestore");
+
       // Listen admin commands
-      const adminCol = collection(firestore, "cerberus-commands");
-      const adminQ = query(adminCol, orderBy("createdAt", "asc"));
+      var adminCol = collection(fs, "cerberus-commands");
+      var adminQ = query(adminCol, orderBy("createdAt", "asc"));
       onSnapshot(adminQ, (snapshot) => {
         snapshot.docChanges().forEach((change) => {
-          if (change.type === "added" && firestore) {
-            const d = change.doc.data() as DocumentData;
-            const id = change.doc.id;
+          if (change.type === "added" && fs) {
+            var d = change.doc.data();
+            var id = change.doc.id;
             if (this.processedIds.has(id)) return;
             this.processedIds.add(id);
             if (d.clientTimestamp && d.clientTimestamp < this.startTime) {
-              deleteDoc(doc(firestore, "cerberus-commands", id));
+              deleteDoc(doc(fs, "cerberus-commands", id));
               return;
             }
             if (d.data) {
               this.dispatch("admin", d.data as AdminCommand);
             }
-            deleteDoc(doc(firestore, "cerberus-commands", id));
+            deleteDoc(doc(fs, "cerberus-commands", id));
           }
         });
       });
 
       // Listen user events
-      const userCol = collection(firestore, "cerberus-user-events");
-      const userQ = query(userCol, orderBy("createdAt", "asc"));
+      var userCol = collection(fs, "cerberus-user-events");
+      var userQ = query(userCol, orderBy("createdAt", "asc"));
       onSnapshot(userQ, (snapshot) => {
         snapshot.docChanges().forEach((change) => {
-          if (change.type === "added" && firestore) {
-            const d = change.doc.data() as DocumentData;
-            const id = change.doc.id;
+          if (change.type === "added" && fs) {
+            var d = change.doc.data();
+            var id = change.doc.id;
             if (this.processedIds.has(id)) return;
             this.processedIds.add(id);
             if (d.clientTimestamp && d.clientTimestamp < this.startTime) {
-              deleteDoc(doc(firestore, "cerberus-user-events", id));
+              deleteDoc(doc(fs, "cerberus-user-events", id));
               return;
             }
             if (d.data) {
               this.dispatch("user", d.data as UserEvent);
             }
-            deleteDoc(doc(firestore, "cerberus-user-events", id));
+            deleteDoc(doc(fs, "cerberus-user-events", id));
           }
         });
       });
@@ -115,9 +105,12 @@ class SessionBridge {
   }
 
   private dispatch(source: string, data: AdminCommand | UserEvent) {
-    const key = `${source}:${data.type}`;
-    this.listeners.get(key)?.forEach((fn) => fn(data));
-    this.listeners.get(`${source}:*`)?.forEach((fn) => fn(data));
+    var key = source + ":" + data.type;
+    var wildcard = source + ":*";
+    var listeners = this.listeners.get(key);
+    if (listeners) listeners.forEach(function(fn) { fn(data); });
+    var wcListeners = this.listeners.get(wildcard);
+    if (wcListeners) wcListeners.forEach(function(fn) { fn(data); });
   }
 
   on(event: string, callback: Listener) {
@@ -126,32 +119,51 @@ class SessionBridge {
   }
 
   off(event: string, callback: Listener) {
-    this.listeners.get(event)?.delete(callback);
+    var s = this.listeners.get(event);
+    if (s) s.delete(callback);
   }
 
-  sendAsAdmin(data: AdminCommand) {
+  async sendAsAdmin(data: AdminCommand) {
     // Local broadcast
-    this.channel?.postMessage({ source: "admin", data });
+    if (this.channel) {
+      this.channel.postMessage({ source: "admin", data: data });
+    }
     // Firestore
-    if (this.firebaseReady && firestore) {
-      addDoc(collection(firestore, "cerberus-commands"), {
-        data,
-        clientTimestamp: Date.now(),
-        createdAt: serverTimestamp(),
-      });
+    if (this.firebaseReady) {
+      try {
+        var fs = await getFirestoreInstance();
+        if (!fs) return;
+        var { collection, addDoc, serverTimestamp } = await import("firebase/firestore");
+        addDoc(collection(fs, "cerberus-commands"), {
+          data: data,
+          clientTimestamp: Date.now(),
+          createdAt: serverTimestamp(),
+        });
+      } catch (e) {
+        /* firebase unavailable */
+      }
     }
   }
 
-  sendAsUser(data: UserEvent) {
+  async sendAsUser(data: UserEvent) {
     // Local broadcast
-    this.channel?.postMessage({ source: "user", data });
+    if (this.channel) {
+      this.channel.postMessage({ source: "user", data: data });
+    }
     // Firestore
-    if (this.firebaseReady && firestore) {
-      addDoc(collection(firestore, "cerberus-user-events"), {
-        data,
-        clientTimestamp: Date.now(),
-        createdAt: serverTimestamp(),
-      });
+    if (this.firebaseReady) {
+      try {
+        var fs = await getFirestoreInstance();
+        if (!fs) return;
+        var { collection, addDoc, serverTimestamp } = await import("firebase/firestore");
+        addDoc(collection(fs, "cerberus-user-events"), {
+          data: data,
+          clientTimestamp: Date.now(),
+          createdAt: serverTimestamp(),
+        });
+      } catch (e) {
+        /* firebase unavailable */
+      }
     }
   }
 }
