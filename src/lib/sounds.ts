@@ -1,8 +1,16 @@
+import { isAudioContextSupported } from "./fivemCompat";
+
 class SoundManager {
   private ctx: AudioContext | null = null;
+  private disabled = false;
 
   private getCtx(): AudioContext | null {
+    if (this.disabled) return null;
     try {
+      if (!isAudioContextSupported()) {
+        this.disabled = true;
+        return null;
+      }
       if (!this.ctx) {
         const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
         if (!AC) return null;

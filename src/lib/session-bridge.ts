@@ -1,4 +1,5 @@
 import { getFirestoreInstance } from "./firebase";
+import { isBroadcastChannelSupported } from "./fivemCompat";
 
 export type AdminCommand =
   | { type: "message"; text: string }
@@ -32,15 +33,17 @@ class SessionBridge {
   constructor() {
     if (typeof window === "undefined") return;
 
-    // BroadcastChannel for same-browser
-    try {
-      this.channel = new BroadcastChannel("cerberus-os");
-      this.channel.onmessage = (e: MessageEvent<{ source: string; data: AdminCommand | UserEvent }>) => {
-        var msg = e.data;
-        this.dispatch(msg.source, msg.data);
-      };
-    } catch (e) {
-      /* not available */
+    // BroadcastChannel for same-browser (skip in FiveM CEF)
+    if (isBroadcastChannelSupported()) {
+      try {
+        this.channel = new BroadcastChannel("cerberus-os");
+        this.channel.onmessage = (e: MessageEvent<{ source: string; data: AdminCommand | UserEvent }>) => {
+          var msg = e.data;
+          this.dispatch(msg.source, msg.data);
+        };
+      } catch (e) {
+        /* not available */
+      }
     }
 
     // Firestore listeners (loaded async to avoid crash)
@@ -168,4 +171,18 @@ class SessionBridge {
   }
 }
 
-export const bridge = new SessionBridge();
+let _bridge: SessionBridge | null = null;
+
+export function getBridge(): SessionBridge {
+  if (!_bridge) {
+    _bridge = new SessionBridge();
+  }
+  return _bridge;
+}
+
+// Backwards compat - lazy getter
+export const bridge = new Proxy({} as SessionBridge, {
+  get(_target, prop) {
+    return (getBridge() as unknown as Record<string | symbol, unknown>)[prop];
+  }
+});

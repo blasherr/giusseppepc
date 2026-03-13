@@ -3,6 +3,8 @@
    Saved in localStorage, shared between terminal & tracker
    ───────────────────────────────────────────────────────── */
 
+import { safeStorage } from "./fivemCompat";
+
 export interface DayProgress {
   day: number;
   title: string;
@@ -91,7 +93,7 @@ function createDefaultState(): GameState {
 export function loadGameState(): GameState {
   if (typeof window === "undefined") return createDefaultState();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = safeStorage.getItem(STORAGE_KEY);
     if (!raw) return createDefaultState();
     return JSON.parse(raw) as GameState;
   } catch {
@@ -102,18 +104,14 @@ export function loadGameState(): GameState {
 export function saveGameState(state: GameState): void {
   if (typeof window === "undefined") return;
   state.lastActivity = new Date().toISOString();
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch {
-    // storage full or unavailable
-  }
+  safeStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   // Dispatch event so other components can listen
   window.dispatchEvent(new CustomEvent("aura-state-change", { detail: state }));
 }
 
 export function resetGameState(): void {
   if (typeof window === "undefined") return;
-  try { localStorage.removeItem(STORAGE_KEY); } catch (e) { /* blocked */ }
+  safeStorage.removeItem(STORAGE_KEY);
   window.dispatchEvent(new CustomEvent("aura-state-change", { detail: createDefaultState() }));
 }
 
