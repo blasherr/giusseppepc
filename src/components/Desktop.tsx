@@ -1,408 +1,373 @@
 "use client";
 import { useState, useEffect, useCallback, useRef } from "react";
 import Terminal from "./Terminal";
+import AdminTerminal from "./AdminTerminal";
+import AuraTerminal from "./AuraTerminal";
+import ReportViewer from "./ReportViewer";
+import TrackerDashboard from "./TrackerDashboard";
+import EffectsLayer from "./EffectsLayer";
+import { sounds } from "@/lib/sounds";
+import type { FullReport } from "@/lib/task-sequences";
 
-interface WindowState {
+interface Win {
   id: string;
-  type: "terminal";
+  type: "terminal" | "admin-terminal" | "aura-terminal" | "report" | "tracker";
   title: string;
   x: number;
   y: number;
-  width: number;
-  height: number;
+  w: number;
+  h: number;
   minimized: boolean;
   focused: boolean;
 }
 
-interface ContextMenu {
-  x: number;
-  y: number;
-}
+interface CtxMenu { x: number; y: number }
 
-export default function Desktop() {
-  const [windows, setWindows] = useState<WindowState[]>([]);
+type DragMode =
+  | { kind: "move"; id: string; ox: number; oy: number }
+  | { kind: "resize"; id: string; dir: string; sx: number; sy: number; sw: number; sh: number; sLeft: number; sTop: number };
+
+const MIN_W = 420;
+const MIN_H = 280;
+
+export default function Desktop({ session }: { session: "gp-two" | "admin" }) {
+  const [wins, setWins] = useState<Win[]>([]);
   const [time, setTime] = useState("");
   const [date, setDate] = useState("");
-  const [startMenuOpen, setStartMenuOpen] = useState(false);
-  const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
-  const [dragState, setDragState] = useState<{
-    id: string;
-    offsetX: number;
-    offsetY: number;
-  } | null>(null);
-  const desktopRef = useRef<HTMLDivElement>(null);
-  const windowCounter = useRef(0);
+  const [startMenu, setStartMenu] = useState(false);
+  const [ctx, setCtx] = useState<CtxMenu | null>(null);
+  const [reportData, setReportData] = useState<FullReport | null>(null);
+  const dragRef = useRef<DragMode | null>(null);
+  const counter = useRef(0);
 
-  // Clock
   useEffect(() => {
-    const updateClock = () => {
+    const tick = () => {
       const now = new Date();
-      setTime(now.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
-      setDate(now.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" }));
+      setTime(now.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }));
+      setDate(now.toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "2-digit" }));
     };
-    updateClock();
-    const interval = setInterval(updateClock, 1000);
-    return () => clearInterval(interval);
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
   }, []);
 
-  // Close context menu & start menu on click
   useEffect(() => {
-    const handleClick = () => {
-      setContextMenu(null);
-      setStartMenuOpen(false);
-    };
-    window.addEventListener("click", handleClick);
-    return () => window.removeEventListener("click", handleClick);
+    const handler = () => { setCtx(null); setStartMenu(false); };
+    window.addEventListener("click", handler);
+    return () => window.removeEventListener("click", handler);
   }, []);
 
-  // Drag handling
   useEffect(() => {
-    if (!dragState) return;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      setWindows((prev) =>
-        prev.map((w) =>
-          w.id === dragState.id
-            ? { ...w, x: e.clientX - dragState.offsetX, y: e.clientY - dragState.offsetY }
-            : w
-        )
-      );
+    const onMove = (e: MouseEvent) => {
+      const d = dragRef.current;
+      if (!d) return;
+      e.preventDefault();
+      if (d.kind === "move") {
+        setWins((p) => p.map((w) => w.id === d.id ? { ...w, x: e.clientX - d.ox, y: Math.max(0, e.clientY - d.oy) } : w));
+      } else {
+        setWins((p) =>
+          p.map((w) => {
+            if (w.id !== d.id) return w;
+            let { sLeft: nx, sTop: ny, sw: nw, sh: nh } = d;
+            const dx = e.clientX - d.sx;
+            const dy = e.clientY - d.sy;
+            if (d.dir.includes("e")) nw = Math.max(MIN_W, d.sw + dx);
+            if (d.dir.includes("s")) nh = Math.max(MIN_H, d.sh + dy);
+            if (d.dir.includes("w")) { nw = Math.max(MIN_W, d.sw - dx); nx = d.sLeft + (d.sw - nw); }
+            if (d.dir.includes("n")) { nh = Math.max(MIN_H, d.sh - dy); ny = d.sTop + (d.sh - nh); }
+            return { ...w, x: nx, y: ny, w: nw, h: nh };
+          })
+        );
+      }
     };
+    const onUp = () => { dragRef.current = null; };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+  }, []);
 
-    const handleMouseUp = () => setDragState(null);
+  const focus = useCallback((id: string) => {
+    setWins((p) => p.map((w) => ({ ...w, focused: w.id === id })));
+  }, []);
 
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
-    return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
-    };
-  }, [dragState]);
-
-  const openTerminal = useCallback(() => {
-    windowCounter.current += 1;
-    const id = `TERM-${String(windowCounter.current).padStart(3, "0")}`;
-    setWindows((prev) => [
-      ...prev.map((w) => ({ ...w, focused: false })),
+  const openWin = useCallback((type: Win["type"]) => {
+    counter.current += 1;
+    const prefix = type === "admin-terminal" ? "ADM" : type === "aura-terminal" ? "AURA" : type === "report" ? "RPT" : type === "tracker" ? "TRK" : "TERM";
+    const id = `${prefix}-${String(counter.current).padStart(3, "0")}`;
+    sounds.windowOpen();
+    setWins((p) => [
+      ...p.map((w) => ({ ...w, focused: false })),
       {
-        id,
-        type: "terminal" as const,
-        title: `CERBERUS TERMINAL // ${id}`,
-        x: 100 + (windowCounter.current % 5) * 30,
-        y: 60 + (windowCounter.current % 5) * 30,
-        width: 750,
-        height: 480,
-        minimized: false,
-        focused: true,
+        id, type,
+        title: type === "admin-terminal" ? "Admin Control" : type === "aura-terminal" ? "AURA-01 Lab" : type === "report" ? "Rapport AURA-01" : type === "tracker" ? "Project Tracker" : "Terminal",
+        x: 100 + (counter.current % 5) * 30,
+        y: 60 + (counter.current % 5) * 30,
+        w: type === "aura-terminal" ? 900 : type === "report" ? 950 : type === "tracker" ? 1000 : 780,
+        h: type === "aura-terminal" ? 600 : type === "report" ? 650 : type === "tracker" ? 680 : 500,
+        minimized: false, focused: true,
       },
     ]);
   }, []);
 
-  const closeWindow = useCallback((id: string) => {
-    setWindows((prev) => prev.filter((w) => w.id !== id));
+  const closeWin = useCallback((id: string) => {
+    sounds.windowClose();
+    setWins((p) => p.filter((w) => w.id !== id));
   }, []);
 
-  const focusWindow = useCallback((id: string) => {
-    setWindows((prev) =>
-      prev.map((w) => ({ ...w, focused: w.id === id }))
-    );
-  }, []);
-
-  const toggleMinimize = useCallback((id: string) => {
-    setWindows((prev) =>
-      prev.map((w) =>
+  const toggleMin = useCallback((id: string) => {
+    setWins((p) =>
+      p.map((w) =>
         w.id === id
           ? { ...w, minimized: !w.minimized, focused: !w.minimized }
-          : w.minimized
-          ? w
-          : { ...w, focused: false }
+          : w.minimized ? w : { ...w, focused: false }
       )
     );
   }, []);
 
-  const handleContextMenu = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    setContextMenu({ x: e.clientX, y: e.clientY });
+  const startDrag = useCallback((id: string, e: React.MouseEvent) => {
+    focus(id);
+    const win = wins.find((w) => w.id === id);
+    if (!win) return;
+    dragRef.current = { kind: "move", id, ox: e.clientX - win.x, oy: e.clientY - win.y };
+  }, [wins, focus]);
+
+  const startResize = useCallback((id: string, dir: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    focus(id);
+    const win = wins.find((w) => w.id === id);
+    if (!win) return;
+    dragRef.current = { kind: "resize", id, dir, sx: e.clientX, sy: e.clientY, sw: win.w, sh: win.h, sLeft: win.x, sTop: win.y };
+  }, [wins, focus]);
+
+  const isAdmin = session === "admin";
+
+  const handleExport = useCallback((report: FullReport) => {
+    setReportData({ ...report, tasks: [...report.tasks] });
   }, []);
 
-  const handleStartDrag = useCallback(
-    (id: string, e: React.MouseEvent) => {
-      focusWindow(id);
-      setDragState({
-        id,
-        offsetX: e.clientX - (windows.find((w) => w.id === id)?.x ?? 0),
-        offsetY: e.clientY - (windows.find((w) => w.id === id)?.y ?? 0),
-      });
-    },
-    [windows, focusWindow]
-  );
-
   return (
-    <div className="scanlines fixed inset-0 flex flex-col" onContextMenu={handleContextMenu}>
+    <div className="fixed inset-0 flex flex-col overflow-hidden" onContextMenu={(e) => { e.preventDefault(); setCtx({ x: e.clientX, y: e.clientY }); }}>
+      <EffectsLayer />
+
       {/* Desktop area */}
-      <div
-        ref={desktopRef}
-        className="flex-1 relative overflow-hidden"
-        style={{
-          background: "#0a0a0a",
-        }}
-      >
-        {/* Wallpaper - Cerberus Logo */}
-        <div className="absolute inset-0 flex items-center justify-center">
+      <div className="flex-1 min-h-0 relative overflow-hidden bg-[#080809]">
+        {/* Wallpaper */}
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="https://imgg.fr/r/HiqDM5yF.png"
-            alt="Cerberus"
-            className="max-w-[60%] max-h-[60%] object-contain opacity-30"
-            style={{
-              filter: "drop-shadow(0 0 40px rgba(255, 0, 51, 0.2))",
-            }}
-            crossOrigin="anonymous"
-          />
+          <img src="/cerberus-logo.png" alt="" className="w-[320px] h-[320px] object-contain opacity-[0.15]" />
         </div>
 
-        {/* Subtle grid overlay */}
-        <div
-          className="absolute inset-0 opacity-[0.03] pointer-events-none"
-          style={{
-            backgroundImage:
-              "linear-gradient(rgba(255,0,51,0.3) 1px, transparent 1px), linear-gradient(90deg, rgba(255,0,51,0.3) 1px, transparent 1px)",
-            backgroundSize: "50px 50px",
-          }}
-        />
-
         {/* Desktop icons */}
-        <div className="absolute top-6 left-6 flex flex-col gap-4">
+        <div className="absolute top-8 left-8 flex flex-col gap-3">
           <button
-            className="flex flex-col items-center gap-1 p-3 rounded hover:bg-[#ff0033]/10 transition-all duration-200 group w-20"
-            onDoubleClick={openTerminal}
+            className="flex flex-col items-center gap-2 p-2 w-[72px] group"
+            onDoubleClick={() => openWin("terminal")}
           >
-            <div className="w-12 h-12 flex items-center justify-center border border-[#ff0033]/30 bg-[#111]/80 
-                            group-hover:border-[#ff0033]/60 group-hover:shadow-[0_0_15px_rgba(255,0,51,0.2)] transition-all">
-              <span className="text-[#ff0033] text-lg font-bold">&gt;_</span>
+            <div className="w-12 h-12 rounded-lg flex items-center justify-center transition-all group-hover:scale-110">
+              <span className="text-[var(--c-accent)] text-xl font-bold drop-shadow-[0_0_6px_var(--c-accent)]">&gt;_</span>
             </div>
-            <span className="text-[10px] text-[#e0e0e0]/70 tracking-wider group-hover:text-[#ff0033]/90 transition-colors">
-              TERMINAL
-            </span>
+            <span className="text-[11px] text-white/50 group-hover:text-white/80 transition-colors leading-tight drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)]">Terminal</span>
+          </button>
+          {isAdmin && (
+            <button
+              className="flex flex-col items-center gap-2 p-2 w-[72px] group"
+              onDoubleClick={() => openWin("admin-terminal")}
+            >
+              <div className="w-12 h-12 rounded-lg flex items-center justify-center transition-all group-hover:scale-110">
+                <span className="text-red-400 text-xl font-bold drop-shadow-[0_0_6px_rgba(239,68,68,0.5)]">⚡</span>
+              </div>
+              <span className="text-[11px] text-white/50 group-hover:text-red-400/90 transition-colors leading-tight drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)]">Admin</span>
+            </button>
+          )}
+          {/* AURA-01 Lab icon */}
+          <button
+            className="flex flex-col items-center gap-2 p-2 w-[72px] group"
+            onDoubleClick={() => openWin("aura-terminal")}
+          >
+            <div className="w-12 h-12 rounded-lg flex items-center justify-center transition-all group-hover:scale-110">
+              <span className="text-[var(--c-accent)] text-xl font-bold drop-shadow-[0_0_8px_rgba(255,42,42,0.6)]">◈</span>
+            </div>
+            <span className="text-[11px] text-white/50 group-hover:text-[var(--c-accent)]/90 transition-colors leading-tight drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)]">AURA Lab</span>
+          </button>
+          {/* Report file icon - appears after first export */}
+          {reportData && reportData.tasks.length > 0 && (
+            <button
+              className="flex flex-col items-center gap-2 p-2 w-[72px] group relative"
+              onDoubleClick={() => openWin("report")}
+            >
+              <div className="w-12 h-12 rounded-lg flex items-center justify-center transition-all group-hover:scale-110 relative">
+                <span className="text-[var(--c-accent)] text-xl font-bold drop-shadow-[0_0_8px_rgba(255,42,42,0.6)]">📊</span>
+                <div className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-[var(--c-accent)] animate-pulse shadow-[0_0_6px_rgba(255,42,42,0.5)]" />
+              </div>
+              <span className="text-[11px] text-white/50 group-hover:text-[var(--c-accent)]/90 transition-colors leading-tight drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)]">Rapport</span>
+            </button>
+          )}
+          {/* Project Tracker icon */}
+          <button
+            className="flex flex-col items-center gap-2 p-2 w-[72px] group"
+            onDoubleClick={() => openWin("tracker")}
+          >
+            <div className="w-12 h-12 rounded-lg flex items-center justify-center transition-all group-hover:scale-110">
+              <span className="text-[var(--c-accent)] text-xl font-bold drop-shadow-[0_0_8px_rgba(255,42,42,0.6)]">📈</span>
+            </div>
+            <span className="text-[11px] text-white/50 group-hover:text-[var(--c-accent)]/90 transition-colors leading-tight drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)]">Tracker</span>
           </button>
         </div>
 
         {/* Windows */}
-        {windows.map((win) =>
+        {wins.map((win) =>
           win.minimized ? null : (
             <div
               key={win.id}
-              className={`absolute window-chrome rounded-sm overflow-hidden flex flex-col transition-shadow duration-200
-                ${win.focused ? "z-30 shadow-[0_0_40px_rgba(255,0,51,0.15)]" : "z-20 opacity-90"}`}
-              style={{
-                left: win.x,
-                top: win.y,
-                width: win.width,
-                height: win.height,
-              }}
-              onMouseDown={() => focusWindow(win.id)}
+              className={`absolute flex flex-col rounded-lg overflow-hidden transition-shadow duration-200
+                ${win.focused
+                  ? "z-30 shadow-[0_12px_50px_rgba(0,0,0,0.7),0_0_1px_rgba(255,42,42,0.3)]"
+                  : "z-20 opacity-90 shadow-[0_8px_30px_rgba(0,0,0,0.5)]"
+                }
+                bg-[#0e0e11] border border-white/[0.06]`}
+              style={{ left: win.x, top: win.y, width: win.w, height: win.h }}
+              onMouseDown={() => focus(win.id)}
             >
               {/* Title bar */}
               <div
-                className="flex items-center justify-between px-3 py-1.5 bg-[#0d0d0d] border-b border-[#ff0033]/20 cursor-move select-none"
-                onMouseDown={(e) => handleStartDrag(win.id, e)}
+                className="flex items-center justify-between px-4 h-10 bg-[#0e0e11] border-b border-white/[0.05] select-none cursor-move shrink-0"
+                onMouseDown={(e) => startDrag(win.id, e)}
               >
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-[#ff0033]/60 animate-pulse" />
-                  <span className="text-[10px] text-[#ff0033]/60 tracking-[0.2em]">
-                    {win.title}
-                  </span>
+                <div className="flex items-center gap-2.5">
+                  <div className={`w-2 h-2 rounded-full ${win.focused ? "bg-[var(--c-accent)]" : "bg-white/10"}`} />
+                  <span className="text-xs text-white/50 tracking-wider">{win.title}</span>
+                  <span className="text-[10px] text-white/20">{win.id}</span>
                 </div>
                 <div className="flex gap-2">
-                  <button
-                    className="w-4 h-4 flex items-center justify-center text-[#ff0033]/40 hover:text-[#ff0033] hover:bg-[#ff0033]/10 transition-all text-[10px]"
-                    onClick={() => toggleMinimize(win.id)}
-                  >
-                    ─
-                  </button>
-                  <button
-                    className="w-4 h-4 flex items-center justify-center text-[#ff0033]/40 hover:text-white hover:bg-[#ff0033] transition-all text-[10px]"
-                    onClick={() => closeWindow(win.id)}
-                  >
-                    ✕
-                  </button>
+                  <button className="w-7 h-6 flex items-center justify-center text-white/30 hover:text-white/60 hover:bg-white/5 rounded text-xs transition-colors" onClick={() => toggleMin(win.id)}>─</button>
+                  <button className="w-7 h-6 flex items-center justify-center text-white/30 hover:text-white hover:bg-red-500/80 rounded text-xs transition-colors" onClick={() => closeWin(win.id)}>✕</button>
                 </div>
               </div>
 
-              {/* Window content */}
+              {/* Content */}
               <div className="flex-1 overflow-hidden">
-                {win.type === "terminal" && (
-                  <Terminal windowId={win.id} onClose={closeWindow} />
-                )}
+                {win.type === "terminal" && <Terminal windowId={win.id} onClose={closeWin} />}
+                {win.type === "admin-terminal" && <AdminTerminal />}
+                {win.type === "aura-terminal" && <AuraTerminal onExport={handleExport} />}
+                {win.type === "report" && reportData && <ReportViewer report={reportData} />}
+                {win.type === "tracker" && <TrackerDashboard />}
               </div>
 
-              {/* Resize handle visual */}
-              <div className="absolute bottom-0 right-0 w-3 h-3 cursor-se-resize">
-                <div className="absolute bottom-1 right-1 w-1.5 h-1.5 border-b border-r border-[#ff0033]/30" />
-              </div>
+              {/* Resize handles */}
+              {(["n", "s", "e", "w", "ne", "nw", "se", "sw"] as const).map((dir) => (
+                <div key={dir} className={`resize-handle resize-${dir}`} onMouseDown={(e) => startResize(win.id, dir, e)} />
+              ))}
             </div>
           )
         )}
 
         {/* Context menu */}
-        {contextMenu && (
-          <div
-            className="context-menu absolute z-50 min-w-[200px] py-1 rounded-sm"
-            style={{ left: contextMenu.x, top: contextMenu.y }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              className="context-menu-item w-full px-4 py-2 text-left text-xs text-[#e0e0e0]/70 tracking-wider flex items-center gap-3 transition-colors"
-              onClick={() => {
-                openTerminal();
-                setContextMenu(null);
-              }}
-            >
-              <span className="text-[#ff0033]">&gt;_</span> Open Terminal
+        {ctx && (
+          <div className="absolute z-50 min-w-[200px] py-1.5 rounded-lg bg-[#141418] border border-white/[0.08] shadow-[0_12px_40px_rgba(0,0,0,0.6)]"
+            style={{ left: ctx.x, top: ctx.y }} onClick={(e) => e.stopPropagation()}>
+            <button className="w-full px-4 py-2.5 text-left text-xs text-white/60 hover:text-white hover:bg-white/[0.04] tracking-wider flex items-center gap-3 transition-colors"
+              onClick={() => { openWin("terminal"); setCtx(null); }}>
+              <span className="text-[var(--c-accent)]">&gt;_</span> Nouveau terminal
             </button>
-            <div className="h-[1px] bg-[#ff0033]/10 mx-2 my-1" />
-            <button
-              className="context-menu-item w-full px-4 py-2 text-left text-xs text-[#e0e0e0]/70 tracking-wider flex items-center gap-3 transition-colors"
-              onClick={() => setContextMenu(null)}
-            >
-              <span className="text-[#ff0033]">⟳</span> Refresh Desktop
+            {isAdmin && (
+              <button className="w-full px-4 py-2.5 text-left text-xs text-white/60 hover:text-white hover:bg-white/[0.04] tracking-wider flex items-center gap-3 transition-colors"
+                onClick={() => { openWin("admin-terminal"); setCtx(null); }}>
+                <span className="text-red-400">⚡</span> Admin terminal
+              </button>
+            )}
+            <button className="w-full px-4 py-2.5 text-left text-xs text-white/60 hover:text-white hover:bg-white/[0.04] tracking-wider flex items-center gap-3 transition-colors"
+              onClick={() => { openWin("aura-terminal"); setCtx(null); }}>
+              <span className="text-[var(--c-accent)]">◈</span> AURA-01 Lab
             </button>
-            <button
-              className="context-menu-item w-full px-4 py-2 text-left text-xs text-[#e0e0e0]/70 tracking-wider flex items-center gap-3 transition-colors"
-              onClick={() => setContextMenu(null)}
-            >
-              <span className="text-[#ff0033]">⚙</span> System Settings
+            <button className="w-full px-4 py-2.5 text-left text-xs text-white/60 hover:text-white hover:bg-white/[0.04] tracking-wider flex items-center gap-3 transition-colors"
+              onClick={() => { openWin("tracker"); setCtx(null); }}>
+              <span className="text-[var(--c-accent)]">📈</span> Project Tracker
             </button>
-            <div className="h-[1px] bg-[#ff0033]/10 mx-2 my-1" />
-            <button
-              className="context-menu-item w-full px-4 py-2 text-left text-xs text-[#e0e0e0]/30 tracking-wider flex items-center gap-3"
-              disabled
-            >
-              <span className="text-[#ff0033]/30">ⓘ</span> CERBERUS OS v12.0.4
-            </button>
+            <div className="h-px bg-white/[0.05] mx-3 my-1" />
+            <div className="px-4 py-2 text-[10px] text-white/15 tracking-wider">
+              CERBERUS OS v12.0.4
+            </div>
           </div>
         )}
       </div>
 
-      {/* TASKBAR */}
-      <div className="taskbar-glass h-12 flex items-center justify-between px-2 z-40 relative">
-        {/* Start button */}
-        <div className="relative">
+      {/* Taskbar */}
+      <div className="h-12 min-h-[48px] flex items-center px-3 bg-[#0a0a0d]/95 backdrop-blur-md border-t border-[var(--c-accent)]/15 z-40 shrink-0 shadow-[0_-4px_20px_rgba(0,0,0,0.5)]">
+        {/* Start */}
+        <div className="relative shrink-0">
           <button
-            className="flex items-center gap-2 px-3 py-1.5 hover:bg-[#ff0033]/10 transition-all duration-200 border border-transparent hover:border-[#ff0033]/20"
-            onClick={(e) => {
-              e.stopPropagation();
-              setStartMenuOpen(!startMenuOpen);
-            }}
+            className="flex items-center gap-2.5 px-4 h-10 rounded-lg hover:bg-white/[0.06] transition-colors"
+            onClick={(e) => { e.stopPropagation(); setStartMenu(!startMenu); }}
           >
-            <div className="w-5 h-5 flex items-center justify-center">
-              <svg viewBox="0 0 24 24" className="w-4 h-4 fill-[#ff0033]">
-                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" 
-                      stroke="#ff0033" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </div>
-            <span className="text-[10px] text-[#ff0033]/80 tracking-[0.2em] hidden sm:inline">
-              CERBERUS
-            </span>
+            <div className={`w-3 h-3 rounded-full shrink-0 shadow-[0_0_8px] ${isAdmin ? "bg-red-500 shadow-red-500/50" : "bg-[var(--c-accent)] shadow-[var(--c-accent)]/50"}`} />
+            <span className="text-[13px] text-white/70 tracking-[0.15em] font-medium">{isAdmin ? "ADMIN" : "CERBERUS"}</span>
           </button>
 
-          {/* Start menu */}
-          {startMenuOpen && (
-            <div
-              className="absolute bottom-full left-0 mb-1 w-64 context-menu py-2 rounded-sm"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Header */}
-              <div className="px-4 py-3 border-b border-[#ff0033]/10 mb-1">
-                <div className="text-xs text-[#ff0033] tracking-[0.3em] font-bold">
-                  CERBERUS OS
+          {startMenu && (
+            <div className="absolute bottom-full left-0 mb-2 w-64 rounded-lg bg-[#141418] border border-white/[0.08] shadow-[0_12px_40px_rgba(0,0,0,0.6)] py-1.5"
+              onClick={(e) => e.stopPropagation()}>
+              <div className="px-4 py-3 border-b border-white/[0.05]">
+                <div className="text-[13px] text-[var(--c-accent)] tracking-[0.15em] font-bold">
+                  {isAdmin ? "ADMIN SESSION" : "CERBERUS OS"}
                 </div>
-                <div className="text-[10px] text-[#e0e0e0]/30 tracking-wider mt-0.5">
-                  SESSION: GP-TWO // NODE: CRB-ALPHA-07
+                <div className="text-[11px] text-white/25 mt-1">
+                  {isAdmin ? "Full control mode" : "Session: GP-TWO"}
                 </div>
               </div>
-
-              <button
-                className="context-menu-item w-full px-4 py-2.5 text-left text-xs text-[#e0e0e0]/70 tracking-wider flex items-center gap-3 transition-colors"
-                onClick={() => {
-                  openTerminal();
-                  setStartMenuOpen(false);
-                }}
-              >
-                <span className="text-[#ff0033] text-sm">&gt;_</span> Terminal
+              <button className="w-full px-4 py-2.5 text-left text-[13px] text-white/50 hover:text-white hover:bg-white/[0.05] tracking-wider flex items-center gap-3 transition-colors"
+                onClick={() => { openWin("terminal"); setStartMenu(false); }}>
+                <span className="text-[var(--c-accent)]">&gt;_</span> Terminal
               </button>
-              <button
-                className="context-menu-item w-full px-4 py-2.5 text-left text-xs text-[#e0e0e0]/40 tracking-wider flex items-center gap-3"
-                disabled
-              >
-                <span className="text-[#ff0033]/30 text-sm">📁</span> Files (Coming Soon)
+              {isAdmin && (
+                <button className="w-full px-4 py-2.5 text-left text-[13px] text-white/50 hover:text-white hover:bg-white/[0.05] tracking-wider flex items-center gap-3 transition-colors"
+                  onClick={() => { openWin("admin-terminal"); setStartMenu(false); }}>
+                  <span className="text-red-400">⚡</span> Admin Control
+                </button>
+              )}
+              <button className="w-full px-4 py-2.5 text-left text-[13px] text-white/50 hover:text-white hover:bg-white/[0.05] tracking-wider flex items-center gap-3 transition-colors"
+                onClick={() => { openWin("aura-terminal"); setStartMenu(false); }}>
+                <span className="text-[var(--c-accent)]">◈</span> AURA-01 Lab
               </button>
-              <button
-                className="context-menu-item w-full px-4 py-2.5 text-left text-xs text-[#e0e0e0]/40 tracking-wider flex items-center gap-3"
-                disabled
-              >
-                <span className="text-[#ff0033]/30 text-sm">⚙</span> Settings (Coming Soon)
+              <button className="w-full px-4 py-2.5 text-left text-[13px] text-white/50 hover:text-white hover:bg-white/[0.05] tracking-wider flex items-center gap-3 transition-colors"
+                onClick={() => { openWin("tracker"); setStartMenu(false); }}>
+                <span className="text-[var(--c-accent)]">📈</span> Project Tracker
               </button>
-
-              <div className="h-[1px] bg-[#ff0033]/10 mx-2 my-1" />
-              <div className="px-4 py-2 text-[10px] text-[#ff0033]/20 tracking-widest">
-                v12.0.4 // QUANTUM BUILD
-              </div>
             </div>
           )}
         </div>
 
+        {/* Separator */}
+        <div className="w-px h-6 bg-white/[0.08] mx-2 shrink-0" />
+
         {/* Taskbar windows */}
-        <div className="flex-1 flex items-center gap-1 px-2 overflow-x-auto">
-          {windows.map((win) => (
+        <div className="flex-1 flex items-center gap-1 px-1 overflow-x-auto min-w-0">
+          {wins.map((win) => (
             <button
               key={win.id}
-              className={`flex items-center gap-2 px-3 py-1.5 text-[10px] tracking-wider transition-all duration-200 border
-                ${
-                  win.focused && !win.minimized
-                    ? "bg-[#ff0033]/15 border-[#ff0033]/40 text-[#ff0033]"
-                    : "bg-transparent border-transparent text-[#e0e0e0]/40 hover:bg-[#ff0033]/5 hover:text-[#e0e0e0]/60"
+              className={`flex items-center gap-2 px-3.5 h-9 rounded-lg text-[12px] tracking-wider transition-all shrink-0
+                ${win.focused && !win.minimized
+                  ? "text-white bg-white/[0.08] shadow-[inset_0_-2px_0_var(--c-accent)]"
+                  : "text-white/35 hover:text-white/60 hover:bg-white/[0.05]"
                 }`}
-              onClick={() => toggleMinimize(win.id)}
+              onClick={() => toggleMin(win.id)}
             >
-              <span className="text-[#ff0033]">&gt;_</span>
-              <span className="max-w-[100px] truncate">{win.id}</span>
-              {win.focused && !win.minimized && (
-                <div className="w-1 h-1 rounded-full bg-[#ff0033] animate-pulse" />
-              )}
+              <span className={`shrink-0 ${win.type === "admin-terminal" ? "text-red-400" : win.type === "aura-terminal" ? "text-[var(--c-accent)]" : win.type === "report" ? "text-[var(--c-accent)]" : win.type === "tracker" ? "text-[var(--c-accent)]" : "text-[var(--c-accent)]"}`}>
+                {win.type === "admin-terminal" ? "⚡" : win.type === "aura-terminal" ? "◈" : win.type === "report" ? "📊" : win.type === "tracker" ? "📈" : ">_"}
+              </span>
+              <span className="max-w-[120px] truncate">{win.title}</span>
             </button>
           ))}
         </div>
 
-        {/* System tray */}
-        <div className="flex items-center gap-3 px-3">
-          {/* Network indicator */}
-          <div className="flex items-center gap-1.5" title="Network: Connected">
-            <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-            <span className="text-[10px] text-[#e0e0e0]/30 tracking-wider hidden md:inline">
-              NET
-            </span>
-          </div>
+        {/* Separator */}
+        <div className="w-px h-6 bg-white/[0.08] mx-2 shrink-0" />
 
-          {/* Security */}
-          <div className="flex items-center gap-1.5" title="Security: Active">
-            <div className="w-1.5 h-1.5 rounded-full bg-[#ff0033] animate-pulse" />
-            <span className="text-[10px] text-[#e0e0e0]/30 tracking-wider hidden md:inline">
-              SEC
-            </span>
-          </div>
-
-          {/* Separator */}
-          <div className="w-[1px] h-5 bg-[#ff0033]/15" />
-
-          {/* Clock */}
-          <div className="text-right">
-            <div className="text-[11px] text-[#ff0033]/80 tracking-wider tabular-nums">
-              {time}
-            </div>
-            <div className="text-[9px] text-[#e0e0e0]/30 tracking-wider tabular-nums">
-              {date}
-            </div>
+        {/* Tray */}
+        <div className="flex items-center gap-3 px-3 shrink-0">
+          <div className="w-2 h-2 rounded-full bg-[var(--c-accent)]/70 shadow-[0_0_6px_rgba(255,42,42,0.4)]" />
+          <div className="text-right leading-tight">
+            <div className="text-[13px] text-white/60 tabular-nums font-medium">{time}</div>
+            <div className="text-[10px] text-white/30">{date}</div>
           </div>
         </div>
       </div>

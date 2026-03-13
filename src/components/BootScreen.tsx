@@ -1,130 +1,99 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { sounds } from "@/lib/sounds";
 
-const BOOT_LINES = [
+const LINES = [
   { text: "CERBERUS BIOS v3.7.2 // INITIALIZING...", delay: 0 },
-  { text: "CPU: CERBERUS QUANTUM CORE x128 @ 9.8 THz", delay: 200 },
-  { text: "RAM: 2048 PB NEURAL-SYNC DDR9", delay: 400 },
-  { text: "GPU: CERBERUS HYDRA RTX 9090 Ti x3", delay: 600 },
-  { text: "STORAGE: 500 EB QUANTUM-SSD ARRAY", delay: 800 },
-  { text: "", delay: 900 },
-  { text: ">> SCANNING NEURAL INTERFACES... OK", delay: 1000 },
-  { text: ">> LOADING CERBERUS KERNEL v12.0.4... OK", delay: 1300 },
-  { text: ">> INITIALIZING FIREWALL MATRIX... OK", delay: 1600 },
-  { text: ">> MOUNTING ENCRYPTED VOLUMES... OK", delay: 1900 },
-  { text: ">> LOADING SECURITY PROTOCOLS... OK", delay: 2200 },
-  { text: ">> ESTABLISHING NEURAL LINK... OK", delay: 2500 },
-  { text: "", delay: 2600 },
-  { text: "ALL SYSTEMS NOMINAL // BOOT COMPLETE", delay: 2800 },
+  { text: "CPU: QUANTUM CORE x128 @ 9.8 THz", delay: 200 },
+  { text: "RAM: 2048 PB NEURAL-SYNC DDR9", delay: 350 },
+  { text: "GPU: HYDRA RTX 9090 Ti x3 SLI", delay: 500 },
+  { text: "STORAGE: 500 EB QUANTUM-SSD ARRAY", delay: 650 },
+  { text: "", delay: 750 },
+  { text: ">> Scanning neural interfaces... OK", delay: 850 },
+  { text: ">> Loading kernel v12.0.4... OK", delay: 1100 },
+  { text: ">> Initializing firewall matrix... OK", delay: 1350 },
+  { text: ">> Mounting encrypted volumes... OK", delay: 1600 },
+  { text: ">> Establishing neural link... OK", delay: 1850 },
+  { text: "", delay: 1950 },
+  { text: "ALL SYSTEMS NOMINAL — BOOT COMPLETE", delay: 2100 },
 ];
 
 export default function BootScreen({ onComplete }: { onComplete: () => void }) {
-  const [visibleLines, setVisibleLines] = useState<number>(0);
-  const [progressDone, setProgressDone] = useState(false);
+  const [visible, setVisible] = useState(0);
+  const [done, setDone] = useState(false);
+  const played = useRef(false);
 
   useEffect(() => {
+    if (!played.current) {
+      played.current = true;
+      sounds.boot();
+    }
+
     const timers: NodeJS.Timeout[] = [];
-
-    BOOT_LINES.forEach((line, i) => {
-      timers.push(
-        setTimeout(() => {
-          setVisibleLines(i + 1);
-        }, line.delay)
-      );
+    LINES.forEach((_, i) => {
+      timers.push(setTimeout(() => setVisible(i + 1), LINES[i].delay));
     });
-
-    timers.push(
-      setTimeout(() => setProgressDone(true), 3200)
-    );
-
-    timers.push(
-      setTimeout(() => onComplete(), 4500)
-    );
-
+    timers.push(setTimeout(() => setDone(true), 2700));
+    timers.push(setTimeout(() => onComplete(), 3800));
     return () => timers.forEach(clearTimeout);
   }, [onComplete]);
 
   return (
-    <div className="scanlines fixed inset-0 bg-[#0a0a0a] flex flex-col items-center justify-center z-50">
-      {/* Background hex pattern */}
-      <div className="absolute inset-0 opacity-5">
-        <div
-          className="w-full h-full"
-          style={{
-            backgroundImage: `radial-gradient(circle, rgba(255,0,51,0.1) 1px, transparent 1px)`,
-            backgroundSize: "30px 30px",
-          }}
-        />
-      </div>
-
-      {/* Cerberus Logo */}
-      <div className="mb-8 relative">
-        <div className="text-5xl font-bold text-[#ff0033] glitch-text tracking-[0.3em]">
+    <div className="scanlines fixed inset-0 bg-[var(--c-bg)] flex flex-col items-center justify-center z-50">
+      {/* Title */}
+      <div className="mb-8 text-center slide-up">
+        <h1 className="text-4xl font-bold text-[var(--c-accent)] tracking-[0.3em]">
           CERBERUS
-        </div>
-        <div className="text-sm text-center text-[#ff0033]/60 tracking-[0.5em] mt-1">
+        </h1>
+        <p className="text-[10px] text-[var(--c-text-dim)] tracking-[0.5em] mt-1">
           OPERATING SYSTEM
-        </div>
-        {/* Decorative lines */}
-        <div className="absolute -left-20 top-1/2 w-16 h-[1px] bg-gradient-to-r from-transparent to-[#ff0033]/50" />
-        <div className="absolute -right-20 top-1/2 w-16 h-[1px] bg-gradient-to-l from-transparent to-[#ff0033]/50" />
+        </p>
       </div>
 
-      {/* Boot log */}
-      <div className="w-[700px] max-w-[90vw] text-sm space-y-1 mb-8 font-mono">
-        {BOOT_LINES.slice(0, visibleLines).map((line, i) => (
-          <div
-            key={i}
-            className="boot-line text-[#ff0033]/80"
-            style={{ animationDelay: `${i * 0.02}s` }}
-          >
-            {line.text === "" ? <br /> : (
-              <>
-                <span className="text-[#ff0033]/40 mr-2">
-                  [{String(i).padStart(2, "0")}]
+      {/* Log */}
+      <div className="w-[640px] max-w-[90vw] font-mono text-[12px] space-y-0.5 mb-8">
+        {LINES.slice(0, visible).map((line, i) => (
+          <div key={i} className="boot-line" style={{ animationDelay: `${i * 15}ms` }}>
+            {line.text === "" ? (
+              <br />
+            ) : (
+              <span className={line.text.includes("OK")
+                ? "text-[var(--c-text-dim)]"
+                : i === LINES.length - 1
+                ? "text-[var(--c-accent)] font-bold"
+                : "text-[var(--c-text-dim)]/70"
+              }>
+                <span className="text-[var(--c-accent)]/30 mr-1.5 text-[10px]">
+                  {String(i).padStart(2, "0")}
                 </span>
                 {line.text.includes("OK") ? (
                   <>
                     {line.text.replace(" OK", "")}
-                    <span className="text-green-500 ml-2">OK</span>
+                    <span className="text-[var(--c-accent)] ml-1">OK</span>
                   </>
                 ) : (
                   line.text
                 )}
-              </>
+              </span>
             )}
           </div>
         ))}
       </div>
 
-      {/* Progress bar */}
-      <div className="w-[500px] max-w-[80vw] h-1 bg-[#1a1a1a] rounded-full overflow-hidden relative">
-        <div
-          className={`h-full bg-gradient-to-r from-[#990022] via-[#ff0033] to-[#990022] rounded-full transition-all duration-300 ${
-            !progressDone ? "boot-progress" : "w-full"
-          }`}
-          style={{
-            boxShadow: "0 0 10px rgba(255, 0, 51, 0.5), 0 0 20px rgba(255, 0, 51, 0.3)",
-          }}
-        />
+      {/* Progress */}
+      <div className="w-[400px] max-w-[70vw]">
+        <div className="h-[2px] bg-[var(--c-border)] overflow-hidden">
+          <div className={`h-full bg-[var(--c-accent)] ${done ? "w-full" : "boot-progress"}`} />
+        </div>
+        <p className="text-center text-[10px] tracking-[0.3em] mt-3 text-[var(--c-text-dim)]">
+          {done ? (
+            <span className="text-[var(--c-accent)]">SYSTEM READY</span>
+          ) : (
+            <span className="cursor-blink">LOADING</span>
+          )}
+        </p>
       </div>
-
-      {/* Status text */}
-      <div className="mt-4 text-xs text-[#ff0033]/50 tracking-widest">
-        {progressDone ? (
-          <span className="text-[#ff0033] text-glow">
-            SYSTEM READY // LAUNCHING SESSION...
-          </span>
-        ) : (
-          <span className="cursor-blink">LOADING CERBERUS OS</span>
-        )}
-      </div>
-
-      {/* Corner decorations */}
-      <div className="absolute top-4 left-4 w-12 h-12 border-l-2 border-t-2 border-[#ff0033]/30" />
-      <div className="absolute top-4 right-4 w-12 h-12 border-r-2 border-t-2 border-[#ff0033]/30" />
-      <div className="absolute bottom-4 left-4 w-12 h-12 border-l-2 border-b-2 border-[#ff0033]/30" />
-      <div className="absolute bottom-4 right-4 w-12 h-12 border-r-2 border-b-2 border-[#ff0033]/30" />
     </div>
   );
 }
+
