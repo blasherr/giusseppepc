@@ -54,21 +54,24 @@ class SessionBridge {
       /* not available */
     }
 
-    // Firestore listeners
-    this.initFirestore();
+    // Firestore listeners (only if Firebase is configured)
+    if (firestore) {
+      this.initFirestore();
+    }
   }
 
   private initFirestore() {
+    if (!firestore) return;
+
     try {
       // Listen admin commands
       const adminCol = collection(firestore, "cerberus-commands");
       const adminQ = query(adminCol, orderBy("createdAt", "asc"));
       onSnapshot(adminQ, (snapshot) => {
         snapshot.docChanges().forEach((change) => {
-          if (change.type === "added") {
+          if (change.type === "added" && firestore) {
             const d = change.doc.data() as DocumentData;
             const id = change.doc.id;
-            // Avoid processing same doc twice or old docs
             if (this.processedIds.has(id)) return;
             this.processedIds.add(id);
             if (d.clientTimestamp && d.clientTimestamp < this.startTime) {
@@ -78,7 +81,6 @@ class SessionBridge {
             if (d.data) {
               this.dispatch("admin", d.data as AdminCommand);
             }
-            // Clean up after processing
             deleteDoc(doc(firestore, "cerberus-commands", id));
           }
         });
@@ -89,7 +91,7 @@ class SessionBridge {
       const userQ = query(userCol, orderBy("createdAt", "asc"));
       onSnapshot(userQ, (snapshot) => {
         snapshot.docChanges().forEach((change) => {
-          if (change.type === "added") {
+          if (change.type === "added" && firestore) {
             const d = change.doc.data() as DocumentData;
             const id = change.doc.id;
             if (this.processedIds.has(id)) return;
@@ -131,7 +133,7 @@ class SessionBridge {
     // Local broadcast
     this.channel?.postMessage({ source: "admin", data });
     // Firestore
-    if (this.firebaseReady) {
+    if (this.firebaseReady && firestore) {
       addDoc(collection(firestore, "cerberus-commands"), {
         data,
         clientTimestamp: Date.now(),
@@ -144,7 +146,7 @@ class SessionBridge {
     // Local broadcast
     this.channel?.postMessage({ source: "user", data });
     // Firestore
-    if (this.firebaseReady) {
+    if (this.firebaseReady && firestore) {
       addDoc(collection(firestore, "cerberus-user-events"), {
         data,
         clientTimestamp: Date.now(),
