@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import "../(main)/globals.css";
 
 export const metadata: Metadata = {
   title: "CERBERUS OS // GP-TWO",
@@ -12,7 +13,10 @@ export default function FiveMLayout({
 }>) {
   return (
     <html lang="en">
-      <body style={{ margin: 0, background: "#0a0a0c", color: "#d4d4d8", fontFamily: "monospace" }}>
+      <body
+        className="antialiased"
+        style={{ fontFamily: "'Share Tech Mono', 'Courier New', 'Lucida Console', monospace" }}
+      >
         {children}
       </body>
     </html>
