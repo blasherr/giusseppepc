@@ -1,76 +1,122 @@
 "use client";
+
 import { useState, useEffect } from "react";
 
-type Phase = "boot" | "login" | "desktop";
-type Session = "gp-two" | "admin";
-
-// FiveM CEF safe page - same as main page but with dynamic imports
-// to avoid parse-time crashes from Firebase/BroadcastChannel/AudioContext
 export default function FiveMPage() {
-  const [phase, setPhase] = useState<Phase>("boot");
-  const [session, setSession] = useState<Session>("gp-two");
+  const [mounted, setMounted] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [Components, setComponents] = useState<{
-    BootScreen: React.ComponentType<{ onComplete: () => void }>;
-    LoginScreen: React.ComponentType<{ onLogin: (s: Session) => void }>;
-    Desktop: React.ComponentType<{ session: Session }>;
-  } | null>(null);
-
   useEffect(() => {
-    (async () => {
-      try {
-        // Load fivemCompat first to set up safe wrappers
-        await import("@/lib/fivemCompat");
-
-        const [boot, login, desktop] = await Promise.all([
-          import("@/components/BootScreen"),
-          import("@/components/LoginScreen"),
-          import("@/components/Desktop"),
-        ]);
-
-        setComponents({
-          BootScreen: boot.default,
-          LoginScreen: login.default,
-          Desktop: desktop.default,
-        });
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-      }
-    })();
+    try {
+      setMounted(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erreur inconnue");
+    }
   }, []);
 
   if (error) {
     return (
-      <div style={{ position: "fixed", inset: 0, background: "#000", color: "#ff4444", fontFamily: "monospace", padding: 20, fontSize: 12 }}>
-        <p>[CERBERUS ERROR] {error}</p>
-      </div>
-    );
-  }
-
-  if (!Components) {
-    return (
-      <div style={{ position: "fixed", inset: 0, background: "#0a0a0a", color: "#10b981", fontFamily: "monospace", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div style={{ textAlign: "center" }}>
-          <p style={{ fontSize: 16, letterSpacing: "0.2em" }}>CERBERUS OS</p>
-          <p style={{ fontSize: 11, opacity: 0.5, marginTop: 8 }}>Initialisation...</p>
+      <div style={{
+        minHeight: "100vh",
+        background: "#0a0a0c",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+      }}>
+        <div style={{
+          background: "rgba(127,29,29,0.5)",
+          border: "1px solid #ef4444",
+          borderRadius: 12,
+          padding: 24,
+          maxWidth: 400,
+        }}>
+          <h1 style={{ color: "#ef4444", fontSize: 20, fontWeight: "bold", marginBottom: 8 }}>Erreur</h1>
+          <p style={{ color: "white" }}>{error}</p>
         </div>
       </div>
     );
   }
 
+  if (!mounted) {
+    return (
+      <div style={{
+        minHeight: "100vh",
+        background: "#0a0a0c",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}>
+        <p style={{ color: "#6b7280", fontSize: 14 }}>Chargement...</p>
+      </div>
+    );
+  }
+
   return (
-    <main className="fixed inset-0 bg-[var(--c-bg)] overflow-hidden select-none">
-      {phase === "boot" && <Components.BootScreen onComplete={() => setPhase("login")} />}
-      {phase === "login" && (
-        <Components.LoginScreen
-          onLogin={(s: Session) => {
-            setSession(s);
-            setPhase("desktop");
-          }}
-        />
-      )}
-      {phase === "desktop" && <Components.Desktop session={session} />}
-    </main>
+    <div style={{
+      minHeight: "100vh",
+      background: "linear-gradient(135deg, #1a0a0a 0%, #0a0a0c 50%, #0a0a14 100%)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 16,
+    }}>
+      <div style={{
+        background: "rgba(0,0,0,0.5)",
+        border: "1px solid rgba(255,42,42,0.3)",
+        borderRadius: 16,
+        padding: 32,
+        maxWidth: 480,
+        width: "100%",
+        textAlign: "center",
+        backdropFilter: "blur(8px)",
+      }}>
+        <div style={{ fontSize: 36, marginBottom: 16 }}>&#x2705;</div>
+        <h1 style={{
+          color: "#ff2a2a",
+          fontSize: 24,
+          fontWeight: "bold",
+          marginBottom: 12,
+          letterSpacing: "0.05em",
+        }}>
+          CERBERUS OS - FiveM
+        </h1>
+        <p style={{ color: "#d4d4d8", marginBottom: 20, fontSize: 14 }}>
+          Cette page fonctionne correctement dans FiveM CEF !
+        </p>
+
+        <div style={{
+          background: "rgba(16,185,129,0.1)",
+          border: "1px solid rgba(16,185,129,0.3)",
+          borderRadius: 8,
+          padding: 12,
+          marginBottom: 16,
+        }}>
+          <p style={{ color: "#10b981", fontSize: 13 }}>
+            Le JavaScript React fonctionne.
+          </p>
+        </div>
+
+        <div style={{
+          background: "rgba(255,42,42,0.08)",
+          border: "1px solid rgba(255,42,42,0.2)",
+          borderRadius: 8,
+          padding: 12,
+          marginBottom: 16,
+        }}>
+          <p style={{ color: "#ff6b6b", fontSize: 13 }}>
+            Viewport: {typeof window !== "undefined" ? `${window.innerWidth}x${window.innerHeight}` : "N/A"}
+          </p>
+          <p style={{ color: "#ff6b6b", fontSize: 11, marginTop: 4 }}>
+            DPR: {typeof window !== "undefined" ? window.devicePixelRatio : "N/A"}
+          </p>
+        </div>
+
+        <div style={{ color: "#6b7280", fontSize: 11, marginTop: 16 }}>
+          Si vous voyez cette page, le probleme vient des composants
+          avances (BootScreen, Desktop, Firebase) et non du CEF.
+        </div>
+      </div>
+    </div>
   );
 }
