@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>CEF Static Test</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0a0a0a; color: #10b981; font-family: monospace; font-size: 14px; padding: 20px; }
+    h1 { font-size: 20px; margin-bottom: 12px; }
+    .info { color: #6b7280; font-size: 11px; margin-bottom: 16px; }
+    .test { padding: 8px; margin: 4px 0; background: #111; border-left: 3px solid #10b981; }
+    .test.fail { border-color: #ef4444; color: #ef4444; }
+  </style>
+</head>
+<body>
+  <h1>CERBERUS - STATIC HTML TEST</h1>
+  <div class="info" id="info">Loading...</div>
+
+  <div class="test">[OK] HTML renders</div>
+  <div class="test">[OK] CSS works</div>
+  <div class="test" id="t-js">[...] JavaScript</div>
+  <div class="test" id="t-vw">[...] Viewport</div>
+  <div class="test" id="t-ls">[...] localStorage</div>
+  <div class="test" id="t-bc">[...] BroadcastChannel</div>
+  <div class="test" id="t-ac">[...] AudioContext</div>
+
+  <script>
+    // JS works
+    document.getElementById('t-js').textContent = '[OK] JavaScript works';
+
+    // Viewport info
+    document.getElementById('info').textContent =
+      'Viewport: ' + window.innerWidth + 'x' + window.innerHeight +
+      ' | Screen: ' + screen.width + 'x' + screen.height +
+      ' | DPR: ' + window.devicePixelRatio +
+      ' | UA: ' + navigator.userAgent.slice(0, 60);
+
+    document.getElementById('t-vw').textContent =
+      '[OK] Viewport: ' + window.innerWidth + 'x' + window.innerHeight + ' DPR:' + window.devicePixelRatio;
+
+    // localStorage
+    try {
+      localStorage.setItem('__t', '1');
+      localStorage.removeItem('__t');
+      document.getElementById('t-ls').textContent = '[OK] localStorage works';
+    } catch(e) {
+      var el = document.getElementById('t-ls');
+      el.textContent = '[FAIL] localStorage: ' + e.message;
+      el.className = 'test fail';
+    }
+
+    // BroadcastChannel
+    try {
+      var bc = new BroadcastChannel('__t');
+      bc.close();
+      document.getElementById('t-bc').textContent = '[OK] BroadcastChannel works';
+    } catch(e) {
+      var el2 = document.getElementById('t-bc');
+      el2.textContent = '[FAIL] BroadcastChannel: ' + e.message;
+      el2.className = 'test fail';
+    }
+
+    // AudioContext
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) {
+        var ctx = new AC(); ctx.close();
+        document.getElementById('t-ac').textContent = '[OK] AudioContext works';
+      } else {
+        document.getElementById('t-ac').textContent = '[FAIL] AudioContext not available';
+        document.getElementById('t-ac').className = 'test fail';
+      }
+    } catch(e) {
+      var el3 = document.getElementById('t-ac');
+      el3.textContent = '[FAIL] AudioContext: ' + e.message;
+      el3.className = 'test fail';
+    }
+  </script>
+</body>
+</html>
