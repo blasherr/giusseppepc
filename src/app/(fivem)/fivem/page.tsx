@@ -2,34 +2,27 @@
 import { useState } from "react";
 import BootScreen from "@/components/BootScreen";
 import LoginScreen from "@/components/LoginScreen";
+import Desktop from "@/components/Desktop";
 
-type Phase = "boot" | "login" | "done";
+type Phase = "boot" | "login" | "desktop";
+type Session = "gp-two" | "admin";
 
 export default function FiveMPage() {
   const [phase, setPhase] = useState<Phase>("boot");
+  const [session, setSession] = useState<Session>("gp-two");
 
   return (
     <main className="fixed inset-0 bg-[var(--c-bg)] overflow-hidden select-none">
       {phase === "boot" && <BootScreen onComplete={() => setPhase("login")} />}
       {phase === "login" && (
         <LoginScreen
-          onLogin={() => {
-            setPhase("done");
+          onLogin={(s: Session) => {
+            setSession(s);
+            setPhase("desktop");
           }}
         />
       )}
-      {phase === "done" && (
-        <div className="flex items-center justify-center h-full">
-          <div className="text-center">
-            <p className="text-[var(--c-accent)] text-2xl font-bold mb-4">
-              CERBERUS OS - FiveM OK
-            </p>
-            <p className="text-[var(--c-text-dim)] text-sm">
-              Boot + Login fonctionnent. Desktop pas encore integre.
-            </p>
-          </div>
-        </div>
-      )}
+      {phase === "desktop" && <Desktop session={session} />}
     </main>
   );
 }
