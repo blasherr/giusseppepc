@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import "../(main)/globals.css";
+import "./fivem.css";
 
 export const metadata: Metadata = {
   title: "CERBERUS OS // GP-TWO",
